@@ -1,6 +1,6 @@
-# Mouse Debounce Time Customizer — macOS
+# Mouse Debounce Controller — macOS
 
-Raise or lower the **click debounce time** on your **Glorious Model O** (and O−, O 2) mouse directly from macOS — no Windows, no Glorious CORE, no virtual machine required.
+Raise or lower the **click debounce time** on your **Glorious Model O** (and O−, O 2) mouse on macOS — no Windows, no Glorious CORE, no virtual machine.
 
 ---
 
@@ -10,9 +10,9 @@ Debounce time is how long the mouse ignores repeated signals after a click to fi
 
 | Value | Effect |
 |-------|--------|
-| **1 ms** | Fastest response, may cause unintended double-clicks |
-| **4 ms** | Good balance (factory default on most units) |
-| **16 ms** | Most stable, slightly slower perceived response |
+| **1 ms** | Fastest response — may cause unintended double-clicks |
+| **4 ms** | Good balance (common factory default) |
+| **16 ms** | Most stable — slightly slower perceived response |
 
 ---
 
@@ -24,73 +24,76 @@ Debounce time is how long the mouse ignores repeated signals after a click to fi
 | Glorious Model O− | `0x258A:0x0033` |
 | Glorious Model O 2 | `0x258A:0x0049` |
 
-> The mouse **must be connected via USB cable**. Wireless dongles do not expose the HID configuration interface.
+> The mouse **must be connected via USB cable** — wireless dongles don't expose the HID config interface.
 
 ---
 
-## Requirements
+## How to get the app
 
-- macOS 10.13 or newer
-- Python 3.8+
-- Glorious Model O connected via USB
+### Option 1 — Build a standalone `.app` (recommended)
 
----
+You get a double-clickable **MouseDebounce.app** you can drop in `/Applications`.
 
-## Setup
+**Requirements:** macOS 10.13+, Python 3.8+ ([download](https://www.python.org/downloads/macos/))
 
 ```bash
-chmod +x setup.sh
-./setup.sh
+# 1. Clone or download this repo, then open Terminal in the folder:
+cd Mouse-debounce-time-customizer-MacOS
+
+# 2. Run the one-command build script:
+chmod +x build_app.sh
+./build_app.sh
+
+# 3. The app appears in dist/:
+open dist/
+# Drag MouseDebounce.app to /Applications and double-click it.
 ```
 
-Or manually:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
+> **First launch warning:** macOS may say _"unidentified developer"_.  
+> Right-click the app → **Open** → **Open**. You only need to do this once.
 
 ---
 
-## Usage
-
-### GUI (recommended)
+### Option 2 — Run directly from Python (no build needed)
 
 ```bash
+# One-time setup:
+chmod +x setup.sh && ./setup.sh
+
+# Launch the GUI every time:
 source .venv/bin/activate
 python main.py
-```
-
-A window opens with a slider. Drag to the desired debounce time and click **Apply**.
-
-### CLI
-
-```bash
-source .venv/bin/activate
-
-python main.py --set 4      # Set 4 ms debounce
-python main.py --set 1      # 1 ms — fastest
-python main.py --set 16     # 16 ms — most stable
-python main.py --list       # Show all detected HID interfaces
-python main.py --set 4 -v   # Verbose: print raw HID bytes
 ```
 
 ---
 
 ## macOS permissions
 
-If you see **"No supported Glorious mouse found"** even though the mouse is plugged in:
+If the app shows **"No Glorious mouse detected"** even though the mouse is plugged in, macOS is blocking HID access.
 
-1. **Try sudo** (quickest fix):
-   ```bash
-   sudo python main.py --set 4
-   ```
+**Fix (30 seconds):**
+1. Click **"Fix Permissions…"** inside the app  
+   — it opens System Settings automatically.
+2. In **Privacy & Security → Input Monitoring**, click **＋** and add  
+   **MouseDebounce.app** (or Terminal if running from the command line).
+3. Click **Apply** in the app again.
 
-2. **Grant Input Monitoring permission** to Terminal (or your IDE):
-   `System Preferences → Privacy & Security → Input Monitoring → ＋ Terminal`
+---
 
-3. Run `python main.py --list` to see all detected HID interfaces for your mouse. If usage_page `0xff00` doesn't appear, the configuration interface may not be accessible on your OS version.
+## CLI usage
+
+```bash
+source .venv/bin/activate
+
+python main.py --set 4      # Set 4 ms debounce
+python main.py --set 1      # 1 ms — fastest response
+python main.py --set 16     # 16 ms — most stable
+python main.py --list       # Show all detected HID interfaces
+python main.py --set 4 -v   # Verbose: print raw HID bytes
+
+# If permission is still denied, prefix with sudo:
+sudo python main.py --set 4
+```
 
 ---
 
@@ -100,21 +103,21 @@ The Glorious Model O exposes two USB HID interfaces:
 
 | Interface | Purpose |
 |-----------|---------|
-| Standard HID (usage page `0x0001`) | Mouse movement and buttons |
-| Vendor HID (usage page `0xFF00`) | Configuration commands |
+| Standard HID (`usage_page 0x0001`) | Mouse movement and buttons |
+| Vendor HID (`usage_page 0xFF00`) | Configuration commands |
 
-This tool writes a 65-byte HID output report to the vendor interface:
+This tool writes a 65-byte output report to the vendor interface:
 
 ```
 Byte  0   0x00  HID report ID
 Byte  1   0x04  Glorious command header
 Byte  2   0x0D  Sub-command: set debounce
 Byte  3   0x00  Reserved
-Byte  4   N     Debounce value in ms (1–16)
+Byte  4   N     Debounce in ms (1–16)
 Bytes 5–64      0x00 padding
 ```
 
-Protocol based on community reverse-engineering of the Glorious CORE software.
+Protocol based on community reverse-engineering of Glorious CORE.
 
 ---
 
@@ -122,7 +125,7 @@ Protocol based on community reverse-engineering of the Glorious CORE software.
 
 | Symptom | Fix |
 |---------|-----|
-| Device not found | Run with `sudo`; check USB cable (not wireless) |
-| Setting appears to apply but feels unchanged | Some firmware versions require the mouse to be power-cycled |
+| "No mouse found" | USB cable required (not wireless); try **Fix Permissions…** or `sudo` |
+| Setting applied but feels unchanged | Power-cycle the mouse (unplug and replug) |
 | `ModuleNotFoundError: hid` | Run `pip install hid` inside the virtual environment |
-| Permission denied on macOS Ventura+ | Grant Input Monitoring to Terminal in System Settings |
+| macOS Gatekeeper warning on first launch | Right-click → Open → Open (once only) |
