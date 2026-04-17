@@ -28,16 +28,16 @@ fi
 echo "Python: $(python3 --version)  ✓"
 
 # ── Virtual environment ──────────────────────────────────────────────────────
-if [[ ! -d .venv ]]; then
-    echo "Creating virtual environment..."
-    python3 -m venv .venv
-fi
+echo "Creating virtual environment..."
+rm -rf .venv          # always start clean so stale packages can't interfere
+python3 -m venv .venv
 source .venv/bin/activate
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
 echo "Installing build dependencies..."
 pip install --quiet --upgrade pip
-pip install --quiet hid pyinstaller
+pip uninstall -y hid 2>/dev/null || true   # remove old ctypes wrapper if present
+pip install --quiet hidapi pyinstaller
 
 # ── Build ────────────────────────────────────────────────────────────────────
 echo ""
