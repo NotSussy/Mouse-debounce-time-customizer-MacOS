@@ -1,6 +1,8 @@
 # PyInstaller spec for MouseDebounce.app
 # Build with:  pyinstaller mouse_debounce.spec --clean --noconfirm
 
+import glob
+import os
 import sys
 from PyInstaller.building.api import PYZ, EXE, COLLECT
 from PyInstaller.building.build_main import Analysis
@@ -8,10 +10,27 @@ from PyInstaller.building.osx import BUNDLE
 
 block_cipher = None
 
+# Locate the hidapi shared library bundled inside the hid package.
+# PyInstaller doesn't detect it automatically because hid loads it at runtime
+# via ctypes — we must tell PyInstaller to include it explicitly.
+import hid as _hid_mod
+_hid_pkg_dir = os.path.dirname(_hid_mod.__file__)
+_hidapi_binaries = [
+    (p, "hid")
+    for p in glob.glob(os.path.join(_hid_pkg_dir, "*.dylib"))
+    + glob.glob(os.path.join(_hid_pkg_dir, "*.so"))
+    + glob.glob(os.path.join(_hid_pkg_dir, "*.so.*"))
+]
+if not _hidapi_binaries:
+    raise RuntimeError(
+        f"Could not find hidapi shared library in {_hid_pkg_dir}.\n"
+        "Run:  pip install hid  inside your virtual environment."
+    )
+
 a = Analysis(
     ["main.py"],
     pathex=[],
-    binaries=[],
+    binaries=_hidapi_binaries,
     datas=[],
     hiddenimports=["hid", "tkinter", "tkinter.ttk", "tkinter.messagebox"],
     hookspath=[],
