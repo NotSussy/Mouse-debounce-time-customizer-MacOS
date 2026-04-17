@@ -1,17 +1,12 @@
 """
 HID communication layer for Glorious Model O mice.
-
-Protocol based on community reverse-engineering of the Glorious CORE software.
-The mouse exposes a vendor-specific HID interface (usage_page=0xFF00) used for
-configuration commands, separate from the standard mouse HID interface.
+Uses macOS IOKit directly — no external Python packages required.
 """
-
-import hid
+from . import macos_hid
 
 GLORIOUS_VID = 0x258A
 
-# Known product IDs for Glorious Model O family
-SUPPORTED_PIDS: dict[int, str] = {
+SUPPORTED_PIDS: dict = {
     0x0033: "Glorious Model O-",
     0x0036: "Glorious Model O",
     0x0049: "Glorious Model O 2",
@@ -20,56 +15,38 @@ SUPPORTED_PIDS: dict[int, str] = {
 DEBOUNCE_MIN = 1
 DEBOUNCE_MAX = 16
 
-# HID report size: 1-byte report ID + 64 bytes payload
-_REPORT_LEN = 65
-
-# Glorious command bytes for debounce
-_CMD_HEADER = 0x04
-_CMD_DEBOUNCE = 0x0D
+_REPORT_LEN    = 65
+_CMD_HEADER    = 0x04
+_CMD_DEBOUNCE  = 0x0D
+_CONFIG_IFACE  = 0xFF00  # vendor-defined HID usage page for config
 
 
-def find_device() -> tuple[bytes | None, str | None]:
-    """
-    Search HID enumeration for a Glorious config interface (usage_page 0xFF00).
-    Returns (path, device_name) or (None, None) if not found.
-    """
+def find_device():
+    """Return (True, device_name) if a supported mouse is found, else (None, None)."""
     for pid, name in SUPPORTED_PIDS.items():
-        for info in hid.enumerate(GLORIOUS_VID, pid):
-            if info.get("usage_page") == 0xFF00:
-                return info["path"], name
+        for d in macos_hid.enumerate_hid(vid=GLORIOUS_VID, pid=pid):
+            if d["usage_page"] == _CONFIG_IFACE:
+                return True, name
     return None, None
 
 
-def list_devices() -> list[dict]:
-    """Return all detected Glorious HID interfaces for diagnostics."""
+def list_devices() -> list:
+    """Return all detected Glorious HID interfaces (for diagnostics)."""
     results = []
     for pid, name in SUPPORTED_PIDS.items():
-        for info in hid.enumerate(GLORIOUS_VID, pid):
-            results.append(
-                {
-                    "name": name,
-                    "path": info["path"],
-                    "usage_page": hex(info.get("usage_page", 0)),
-                    "usage": hex(info.get("usage", 0)),
-                    "interface": info.get("interface_number", -1),
-                    "manufacturer": info.get("manufacturer_string", ""),
-                    "product": info.get("product_string", ""),
-                }
-            )
+        for d in macos_hid.enumerate_hid(vid=GLORIOUS_VID, pid=pid):
+            results.append({"name": name, **d})
     return results
 
 
 def _build_debounce_packet(ms: int) -> bytes:
     """
-    Build the 65-byte HID output report for setting debounce.
-
-    Byte layout (Glorious Model O protocol):
-      [0]  0x00  HID report ID (required by hidapi for output reports)
-      [1]  0x04  Glorious command header
-      [2]  0x0D  Sub-command: set debounce time
-      [3]  0x00  Reserved
-      [4]  N     Debounce value in milliseconds (1–16)
-      [5–64]     0x00 padding
+    65-byte HID output report for Glorious debounce command:
+      [0] 0x00  report ID
+      [1] 0x04  Glorious command header
+      [2] 0x0D  sub-command: set debounce
+      [3] 0x00  reserved
+      [4] N     debounce in ms (1–16)
     """
     pkt = bytearray(_REPORT_LEN)
     pkt[0] = 0x00
@@ -83,56 +60,32 @@ def _build_debounce_packet(ms: int) -> bytes:
 def set_debounce(ms: int, verbose: bool = False) -> str:
     """
     Set debounce time on the connected Glorious mouse.
-
-    Args:
-        ms:      Debounce time in milliseconds (1–16).
-        verbose: Print HID packet details to stdout.
-
-    Returns:
-        Device name string on success.
-
-    Raises:
-        ValueError:   ms is outside the valid range.
-        RuntimeError: Mouse not found or write failed.
+    Returns device name on success. Raises ValueError or RuntimeError.
     """
     if not DEBOUNCE_MIN <= ms <= DEBOUNCE_MAX:
-        raise ValueError(
-            f"Debounce must be {DEBOUNCE_MIN}–{DEBOUNCE_MAX} ms, got {ms}"
-        )
-
-    path, name = find_device()
-    if path is None:
-        raise RuntimeError(
-            "No supported Glorious mouse found.\n"
-            "Make sure the mouse is connected via USB (not a wireless dongle).\n"
-            "On macOS you may need to run with sudo, or grant Input Monitoring\n"
-            "permission: System Preferences → Privacy → Input Monitoring."
-        )
+        raise ValueError(f"Debounce must be {DEBOUNCE_MIN}–{DEBOUNCE_MAX} ms, got {ms}")
 
     pkt = _build_debounce_packet(ms)
-
     if verbose:
-        print(f"Device : {name}")
-        print(f"Path   : {path}")
-        print(f"Packet : {pkt.hex(' ')}")
+        print(f"Packet: {pkt.hex(' ')}")
 
-    # hidapi (cython-hidapi) uses hid.device() + open_path()
-    dev = hid.device()
-    try:
-        dev.open_path(path)
-        written = dev.write(pkt)
+    last_err = None
+    for pid, name in SUPPORTED_PIDS.items():
         if verbose:
-            print(f"Wrote  : {written} bytes")
-
-        # Some firmware versions send a response; timeout is short so we don't block.
+            print(f"Trying {name} (PID 0x{pid:04X}) …")
         try:
-            resp = dev.read(_REPORT_LEN, timeout_ms=500)
-            if verbose and resp:
-                print(f"Response: {bytes(resp[:8]).hex(' ')}")
-        except Exception:
-            pass
+            macos_hid.send_output_report(GLORIOUS_VID, pid, _CONFIG_IFACE, pkt)
+            if verbose:
+                print(f"  → sent OK")
+            return name
+        except OSError as exc:
+            last_err = exc
+            if "not found" in str(exc):
+                continue
+            raise  # re-raise permission / open errors immediately
 
-    finally:
-        dev.close()
-
-    return name
+    raise RuntimeError(
+        "No supported Glorious mouse found.\n"
+        "Make sure the mouse is connected via USB (not a wireless dongle).\n\n"
+        f"Last error: {last_err}"
+    )

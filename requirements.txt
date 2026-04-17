@@ -1,1 +1,2 @@
-hidapi>=0.14.0
+# No runtime dependencies — HID communication uses macOS IOKit via ctypes.
+# pyinstaller is only needed to build the standalone .app (installed by build_app.sh).

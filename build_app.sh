@@ -36,8 +36,7 @@ source .venv/bin/activate
 # ── Dependencies ─────────────────────────────────────────────────────────────
 echo "Installing build dependencies..."
 pip install --quiet --upgrade pip
-pip uninstall -y hid 2>/dev/null || true   # remove old ctypes wrapper if present
-pip install --quiet hidapi pyinstaller
+pip install --quiet pyinstaller   # only build dep — no hid package needed
 
 # ── Build ────────────────────────────────────────────────────────────────────
 echo ""
