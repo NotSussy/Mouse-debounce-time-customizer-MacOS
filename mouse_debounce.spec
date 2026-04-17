@@ -1,8 +1,10 @@
 # PyInstaller spec for MouseDebounce.app
 # Build with:  pyinstaller mouse_debounce.spec --clean --noconfirm
+#
+# Uses the 'hidapi' package (cython-hidapi) which compiles libhidapi into a
+# Python .so extension — PyInstaller bundles .so extensions automatically,
+# so no manual dylib detection is needed.
 
-import glob
-import os
 import sys
 from PyInstaller.building.api import PYZ, EXE, COLLECT
 from PyInstaller.building.build_main import Analysis
@@ -10,27 +12,10 @@ from PyInstaller.building.osx import BUNDLE
 
 block_cipher = None
 
-# Locate the hidapi shared library bundled inside the hid package.
-# PyInstaller doesn't detect it automatically because hid loads it at runtime
-# via ctypes — we must tell PyInstaller to include it explicitly.
-import hid as _hid_mod
-_hid_pkg_dir = os.path.dirname(_hid_mod.__file__)
-_hidapi_binaries = [
-    (p, "hid")
-    for p in glob.glob(os.path.join(_hid_pkg_dir, "*.dylib"))
-    + glob.glob(os.path.join(_hid_pkg_dir, "*.so"))
-    + glob.glob(os.path.join(_hid_pkg_dir, "*.so.*"))
-]
-if not _hidapi_binaries:
-    raise RuntimeError(
-        f"Could not find hidapi shared library in {_hid_pkg_dir}.\n"
-        "Run:  pip install hid  inside your virtual environment."
-    )
-
 a = Analysis(
     ["main.py"],
     pathex=[],
-    binaries=_hidapi_binaries,
+    binaries=[],
     datas=[],
     hiddenimports=["hid", "tkinter", "tkinter.ttk", "tkinter.messagebox"],
     hookspath=[],
@@ -54,8 +39,8 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
-    argv_emulation=True,  # lets .app receive sys.argv on macOS
-    target_arch=None,     # build for current arch (arm64 on Apple Silicon, x86_64 on Intel)
+    argv_emulation=True,
+    target_arch=None,
 )
 
 coll = COLLECT(
@@ -79,9 +64,7 @@ app = BUNDLE(
         "CFBundleShortVersionString": "1.0.0",
         "NSPrincipalClass": "NSApplication",
         "NSHighResolutionCapable": True,
-        # Needed so macOS does not treat the window as a background-only app
         "LSUIElement": False,
-        # Human-readable reason shown in the Input Monitoring privacy prompt
         "NSInputMonitoringUsageDescription": (
             "This app communicates with your Glorious mouse over USB HID "
             "to change its debounce setting."

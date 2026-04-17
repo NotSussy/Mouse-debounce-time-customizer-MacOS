@@ -116,8 +116,10 @@ def set_debounce(ms: int, verbose: bool = False) -> str:
         print(f"Path   : {path}")
         print(f"Packet : {pkt.hex(' ')}")
 
-    dev = hid.Device(path=path)
+    # hidapi (cython-hidapi) uses hid.device() + open_path()
+    dev = hid.device()
     try:
+        dev.open_path(path)
         written = dev.write(pkt)
         if verbose:
             print(f"Wrote  : {written} bytes")
