@@ -25,22 +25,20 @@ def _cli_set(ms: int, verbose: bool) -> None:
 
 
 def _cli_list() -> None:
-    from src.device import list_devices
+    from src.device import scan_all_hid
 
-    devices = list_devices()
+    devices = scan_all_hid()
     if not devices:
-        print("No Glorious mice found.")
+        print("No supported Glorious/SINOWEALTH devices found.")
         return
 
     print(f"Found {len(devices)} HID interface(s):\n")
     for d in devices:
         print(
-            f"  {d['name']}\n"
-            f"    Interface : {d['interface']}\n"
-            f"    Usage page: {d['usage_page']}\n"
-            f"    Usage     : {d['usage']}\n"
-            f"    Product   : {d['product']}\n"
-            f"    Path      : {d['path']}\n"
+            f"  VID=0x{d['vendor_id']:04X}  PID=0x{d['product_id']:04X}\n"
+            f"    usage_page : 0x{d['usage_page']:04X}\n"
+            f"    usage      : 0x{d['usage']:04X}\n"
+            f"    interface  : {d['interface_number']}\n"
         )
 
 
