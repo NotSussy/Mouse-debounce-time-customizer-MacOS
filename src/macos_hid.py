@@ -106,8 +106,24 @@ def enumerate_hid(vid: int = 0, pid: int = 0) -> list:
     return results
 
 
-def send_output_report(vid: int, pid: int, usage_page: int, data: bytes) -> None:
-    """Find device by VID/PID/usage_page, open it, send output report, close."""
+def send_output_report(
+    vid: int,
+    pid: int,
+    usage_page: int,
+    data: bytes,
+    usage: int = 0,
+    report_type: int = None,
+) -> None:
+    """
+    Find device by VID/PID/usage_page (and optionally usage), open it,
+    send an output or feature report, then close.
+
+    report_type defaults to kIOHIDReportTypeOutput (1).
+    Pass kIOHIDReportTypeFeature (2) for feature reports.
+    """
+    if report_type is None:
+        report_type = _kIOHIDReportTypeOutput
+
     mgr = _open_manager()
     devices = _copy_devices(mgr)
 
@@ -115,11 +131,16 @@ def send_output_report(vid: int, pid: int, usage_page: int, data: bytes) -> None
     for dev in devices:
         if not dev:
             continue
-        if ((_int_prop(dev, b"VendorID") == vid) and
-                (_int_prop(dev, b"ProductID") == pid) and
-                (_int_prop(dev, b"PrimaryUsagePage") == usage_page)):
-            target = dev
-            break
+        if _int_prop(dev, b"VendorID") != vid:
+            continue
+        if _int_prop(dev, b"ProductID") != pid:
+            continue
+        if _int_prop(dev, b"PrimaryUsagePage") != usage_page:
+            continue
+        if usage and _int_prop(dev, b"PrimaryUsage") != usage:
+            continue
+        target = dev
+        break
 
     if target is None:
         _CF.CFRelease(mgr)
@@ -142,7 +163,7 @@ def send_output_report(vid: int, pid: int, usage_page: int, data: bytes) -> None
         report_id = data[0]
         payload   = data[1:]
         ret = _IK.IOHIDDeviceSetReport(
-            target, _kIOHIDReportTypeOutput, report_id, payload, len(payload)
+            target, report_type, report_id, payload, len(payload)
         )
         if ret != _kIOReturnSuccess:
             raise OSError(f"IOHIDDeviceSetReport failed: 0x{ret:08x}")
