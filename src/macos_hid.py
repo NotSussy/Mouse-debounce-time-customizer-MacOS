@@ -17,9 +17,10 @@ _BOOL = ctypes.c_bool
 
 _kCFStringEncodingUTF8 = 0x08000100
 _kCFNumberSInt32Type   = 3
-_kIOHIDOptionsTypeNone  = 0
-_kIOHIDReportTypeOutput = 1
-_kIOReturnSuccess       = 0
+_kIOHIDOptionsTypeNone   = 0
+_kIOHIDReportTypeOutput  = 1
+_kIOHIDReportTypeFeature = 2
+_kIOReturnSuccess        = 0
 
 # CoreFoundation
 _CF.CFStringCreateWithCString.restype  = _P
