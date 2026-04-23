@@ -94,25 +94,38 @@ def set_debounce(ms: int, verbose: bool = False) -> str:
     if verbose:
         print(f"Packet: {pkt.hex(' ')}")
 
+    # Report types to try in order: output (1), then feature (2)
+    _REPORT_TYPES = [
+        (macos_hid._kIOHIDReportTypeOutput,  "output"),
+        (macos_hid._kIOHIDReportTypeFeature, "feature"),
+    ]
+
     last_err = None
     for vid, pid, name, cfg_page, cfg_usage in SUPPORTED_DEVICES:
         iface = _config_interface(vid, pid, cfg_page, cfg_usage)
         if iface is None:
             continue
         if verbose:
-            print(f"Found {name} — interface usagePage=0x{cfg_page:04X} usage=0x{cfg_usage:04X}")
-        try:
-            macos_hid.send_output_report(
-                vid, pid, cfg_page, pkt, usage=cfg_usage
-            )
+            print(f"Found {name} — usagePage=0x{cfg_page:04X} usage=0x{cfg_usage:04X}")
+        for rtype, rtype_name in _REPORT_TYPES:
             if verbose:
-                print("  → sent OK")
-            return name
-        except OSError as exc:
-            last_err = exc
-            if "not found" in str(exc):
-                continue
-            raise
+                print(f"  Trying {rtype_name} report …")
+            try:
+                macos_hid.send_output_report(
+                    vid, pid, cfg_page, pkt,
+                    usage=cfg_usage, report_type=rtype,
+                )
+                if verbose:
+                    print(f"  → {rtype_name} report sent OK")
+                return name
+            except OSError as exc:
+                last_err = exc
+                err_str = str(exc)
+                if "not found" in err_str:
+                    break        # device not present, skip remaining report types
+                if verbose:
+                    print(f"  → failed: {exc}")
+                continue         # try next report type
 
     raise RuntimeError(
         "No supported Glorious mouse found.\n"
