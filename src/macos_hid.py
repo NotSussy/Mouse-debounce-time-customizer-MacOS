@@ -51,6 +51,8 @@ _IK.IOHIDDeviceSetReport.restype  = _INT
 _IK.IOHIDDeviceSetReport.argtypes = [_P, _U32, _LONG, ctypes.c_char_p, _LONG]
 _IK.IOHIDDeviceGetProperty.restype  = _P
 _IK.IOHIDDeviceGetProperty.argtypes = [_P, _P]
+_IK.IOHIDDeviceGetReport.restype  = _INT
+_IK.IOHIDDeviceGetReport.argtypes = [_P, _U32, _LONG, ctypes.c_char_p, ctypes.POINTER(_LONG)]
 
 
 def _cfstr(s: bytes) -> int:
@@ -168,6 +170,60 @@ def send_output_report(
         )
         if ret != _kIOReturnSuccess:
             raise OSError(f"IOHIDDeviceSetReport failed: 0x{ret:08x}")
+    finally:
+        _IK.IOHIDDeviceClose(target, _kIOHIDOptionsTypeNone)
+        _CF.CFRelease(mgr)
+
+
+def get_report(
+    vid: int,
+    pid: int,
+    usage_page: int,
+    report_id: int,
+    length: int = 65,
+    report_type: int = None,
+    usage: int = 0,
+) -> bytes:
+    """Read a HID report (default: feature) from the device."""
+    if report_type is None:
+        report_type = _kIOHIDReportTypeFeature
+
+    mgr = _open_manager()
+    devices = _copy_devices(mgr)
+
+    target = None
+    for dev in devices:
+        if not dev:
+            continue
+        if _int_prop(dev, b"VendorID") != vid:
+            continue
+        if _int_prop(dev, b"ProductID") != pid:
+            continue
+        if _int_prop(dev, b"PrimaryUsagePage") != usage_page:
+            continue
+        if usage and _int_prop(dev, b"PrimaryUsage") != usage:
+            continue
+        target = dev
+        break
+
+    if target is None:
+        _CF.CFRelease(mgr)
+        raise OSError(f"Device VID=0x{vid:04X} PID=0x{pid:04X} not found.")
+
+    ret = _IK.IOHIDDeviceOpen(target, _kIOHIDOptionsTypeNone)
+    if ret != _kIOReturnSuccess:
+        _CF.CFRelease(mgr)
+        raise OSError(f"IOHIDDeviceOpen failed: 0x{ret:08x}")
+
+    try:
+        buf = ctypes.create_string_buffer(length)
+        buf_len = _LONG(length)
+        ret = _IK.IOHIDDeviceGetReport(
+            target, report_type, report_id, buf, ctypes.byref(buf_len)
+        )
+        if ret != _kIOReturnSuccess:
+            raise OSError(f"IOHIDDeviceGetReport failed: 0x{ret:08x}")
+        return bytes(buf[:buf_len.value])
     finally:
         _IK.IOHIDDeviceClose(target, _kIOHIDOptionsTypeNone)
         _CF.CFRelease(mgr)

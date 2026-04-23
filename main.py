@@ -6,6 +6,7 @@ Usage:
     python main.py               Launch GUI
     python main.py --set <ms>    Set debounce in ms via CLI
     python main.py --list        List connected Glorious HID interfaces
+    python main.py --probe       Probe device report IDs (diagnostics)
     python main.py --verbose     Show HID packet details (use with --set)
 """
 
@@ -22,6 +23,24 @@ def _cli_set(ms: int, verbose: bool) -> None:
     except (ValueError, RuntimeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
+
+
+def _cli_probe() -> None:
+    from src.device import probe_device
+
+    print("Probing Model O Eternal — trying GET_REPORT for IDs 0x00–0x0F on all interfaces…")
+    print("(This may take a few seconds.)\n")
+    results = probe_device()
+    if not results:
+        print("No report IDs responded to GET_REPORT.")
+        print("The device may require a different communication method.")
+        return
+    print(f"Responsive report IDs found ({len(results)}):\n")
+    for r in results:
+        print(
+            f"  {r['iface']}  reportID=0x{r['report_id']:02X}  type={r['type']}\n"
+            f"  data: {r['data']}\n"
+        )
 
 
 def _cli_list() -> None:
@@ -69,6 +88,11 @@ def main() -> None:
         help="List all detected Glorious HID interfaces",
     )
     parser.add_argument(
+        "--probe",
+        action="store_true",
+        help="Probe device report IDs via GET_REPORT (diagnostic for SINOWEALTH mice)",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Print HID packet bytes (useful with --set for debugging)",
@@ -78,6 +102,10 @@ def main() -> None:
 
     if args.list:
         _cli_list()
+        return
+
+    if args.probe:
+        _cli_probe()
         return
 
     if args.set is not None:
