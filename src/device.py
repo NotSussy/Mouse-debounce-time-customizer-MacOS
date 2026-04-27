@@ -4,30 +4,35 @@ Uses macOS IOKit directly — no external Python packages required.
 """
 from . import macos_hid
 
-# (vendor_id, product_id, display_name, config_usage_page, config_usage, report_id)
-#
-# config_usage_page / config_usage: the HID interface used for configuration.
-#   Glorious original mice: vendor-specific page 0xFF00, any usage.
-#   Model O Eternal (SINOWEALTH chip): only has Generic Desktop (0x0001)
-#     interfaces. We try the keyboard-style sub-interface (usage 0x0006)
-#     and the mouse interface (usage 0x0002), each with report IDs 0x00
-#     and 0x04, until one succeeds.
+PROTOCOL_GLORIOUS   = "glorious"    # VID 0x258A — vendor-specific 0xFF00 interface
+PROTOCOL_SINOWEALTH = "sinowealth"  # VID 0x3794 — Generic Desktop interface, different command set
+
+# (vendor_id, product_id, display_name, config_usage_page, config_usage, protocol)
 SUPPORTED_DEVICES = [
-    (0x258A, 0x0033, "Glorious Model O-",        0xFF00, 0x0000, 0x00),
-    (0x258A, 0x0036, "Glorious Model O",          0xFF00, 0x0000, 0x00),
-    (0x258A, 0x0049, "Glorious Model O 2",        0xFF00, 0x0000, 0x00),
-    (0x3794, 0xA000, "Glorious Model O Eternal",  0x0001, 0x0006, 0x00),
-    (0x3794, 0xA000, "Glorious Model O Eternal",  0x0001, 0x0006, 0x04),
-    (0x3794, 0xA000, "Glorious Model O Eternal",  0x0001, 0x0002, 0x00),
-    (0x3794, 0xA000, "Glorious Model O Eternal",  0x0001, 0x0002, 0x04),
+    (0x258A, 0x0033, "Glorious Model O-",        0xFF00, 0x0000, PROTOCOL_GLORIOUS),
+    (0x258A, 0x0036, "Glorious Model O",          0xFF00, 0x0000, PROTOCOL_GLORIOUS),
+    (0x258A, 0x0049, "Glorious Model O 2",        0xFF00, 0x0000, PROTOCOL_GLORIOUS),
+    (0x3794, 0xA000, "Glorious Model O Eternal",  0x0001, 0x0006, PROTOCOL_SINOWEALTH),
 ]
 
+# Glorious (0x258A) supports 1–16 ms
 DEBOUNCE_MIN = 1
 DEBOUNCE_MAX = 16
 
+# SINOWEALTH (0x3794) supports even values 4–16 ms (stored as ms // 2)
+SINOWEALTH_DEBOUNCE_MIN  = 4
+SINOWEALTH_DEBOUNCE_MAX  = 16
+SINOWEALTH_DEBOUNCE_STEP = 2
+
+# Glorious original protocol constants
 _REPORT_LEN   = 65
 _CMD_HEADER   = 0x04
 _CMD_DEBOUNCE = 0x0D
+
+# SINOWEALTH protocol constants (from libratbag driver-sinowealth.c and gloriousctl)
+_SW_REPORT_LEN    = 6
+_SW_REPORT_ID     = 0x05   # SINOWEALTH_REPORT_ID_CMD
+_SW_CMD_DEBOUNCE  = 0x1A   # CMD_DEBOUNCE
 
 
 def _config_interface(vid: int, pid: int, cfg_page: int, cfg_usage: int):
@@ -42,16 +47,11 @@ def _config_interface(vid: int, pid: int, cfg_page: int, cfg_usage: int):
 
 
 def find_device():
-    """Return (True, device_name) if a supported mouse is found, else (None, None)."""
-    seen = set()
-    for vid, pid, name, page, usage, _rid in SUPPORTED_DEVICES:
-        key = (vid, pid, page, usage)
-        if key in seen:
-            continue
-        seen.add(key)
+    """Return (True, device_name, protocol) if a supported mouse is found, else (None, None, None)."""
+    for vid, pid, name, page, usage, protocol in SUPPORTED_DEVICES:
         if _config_interface(vid, pid, page, usage) is not None:
-            return True, name
-    return None, None
+            return True, name, protocol
+    return None, None, None
 
 
 def list_devices() -> list:
@@ -77,17 +77,10 @@ def scan_all_hid() -> list:
     return results
 
 
-def _build_debounce_packet(ms: int, report_id: int = 0x00) -> bytes:
-    """
-    65-byte HID output report — Glorious/SINOWEALTH debounce command:
-      [0] report_id  HID report ID (0x00 for original Glorious; try 0x04 for SINOWEALTH)
-      [1] 0x04       command header
-      [2] 0x0D       sub-command: set debounce
-      [3] 0x00       reserved
-      [4] N          debounce in ms (1–16)
-    """
+def _build_glorious_packet(ms: int) -> bytes:
+    """65-byte vendor-specific report for original Glorious mice (VID 0x258A)."""
     pkt = bytearray(_REPORT_LEN)
-    pkt[0] = report_id & 0xFF
+    pkt[0] = 0x00          # report ID
     pkt[1] = _CMD_HEADER
     pkt[2] = _CMD_DEBOUNCE
     pkt[3] = 0x00
@@ -95,31 +88,60 @@ def _build_debounce_packet(ms: int, report_id: int = 0x00) -> bytes:
     return bytes(pkt)
 
 
+def _build_sinowealth_packet(ms: int) -> bytes:
+    """
+    6-byte feature report for SINOWEALTH mice (VID 0x3794, e.g. Model O Eternal).
+    Protocol from libratbag driver-sinowealth.c / gloriousctl:
+      [0] 0x05  report ID (SINOWEALTH_REPORT_ID_CMD)
+      [1] 0x1A  command: set debounce
+      [2] N/2   debounce in 2ms units: 4ms→2, 6ms→3, 8ms→4, 10ms→5, 12ms→6, 14ms→7, 16ms→8
+      [3] 0x00
+      [4] 0x00
+      [5] 0x00
+    """
+    return bytes([_SW_REPORT_ID, _SW_CMD_DEBOUNCE, ms // 2, 0x00, 0x00, 0x00])
+
+
 def set_debounce(ms: int, verbose: bool = False) -> str:
     """
     Set debounce time on the connected mouse.
     Returns device name on success. Raises ValueError or RuntimeError.
     """
-    if not DEBOUNCE_MIN <= ms <= DEBOUNCE_MAX:
-        raise ValueError(f"Debounce must be {DEBOUNCE_MIN}–{DEBOUNCE_MAX} ms, got {ms}")
-
-    # Report types to try in order: output (1), then feature (2)
-    _REPORT_TYPES = [
-        (macos_hid._kIOHIDReportTypeOutput,  "output"),
-        (macos_hid._kIOHIDReportTypeFeature, "feature"),
-    ]
-
     last_err = None
-    for vid, pid, name, cfg_page, cfg_usage, report_id in SUPPORTED_DEVICES:
+
+    for vid, pid, name, cfg_page, cfg_usage, protocol in SUPPORTED_DEVICES:
         iface = _config_interface(vid, pid, cfg_page, cfg_usage)
         if iface is None:
             continue
-        pkt = _build_debounce_packet(ms, report_id)
+
+        if protocol == PROTOCOL_SINOWEALTH:
+            if not SINOWEALTH_DEBOUNCE_MIN <= ms <= SINOWEALTH_DEBOUNCE_MAX:
+                raise ValueError(
+                    f"Debounce must be {SINOWEALTH_DEBOUNCE_MIN}–{SINOWEALTH_DEBOUNCE_MAX} ms "
+                    f"(even values only) for {name}, got {ms}"
+                )
+            if ms % 2 != 0:
+                raise ValueError(
+                    f"Debounce must be an even number of ms for {name}, got {ms} "
+                    f"(try {ms - 1} or {ms + 1})"
+                )
+            pkt = _build_sinowealth_packet(ms)
+            report_types = [(macos_hid._kIOHIDReportTypeFeature, "feature")]
+        else:
+            if not DEBOUNCE_MIN <= ms <= DEBOUNCE_MAX:
+                raise ValueError(f"Debounce must be {DEBOUNCE_MIN}–{DEBOUNCE_MAX} ms, got {ms}")
+            pkt = _build_glorious_packet(ms)
+            report_types = [
+                (macos_hid._kIOHIDReportTypeOutput,  "output"),
+                (macos_hid._kIOHIDReportTypeFeature, "feature"),
+            ]
+
         if verbose:
-            print(f"Found {name} — usagePage=0x{cfg_page:04X} usage=0x{cfg_usage:04X} "
-                  f"reportID=0x{report_id:02X}")
+            print(f"Found {name} ({protocol}) — "
+                  f"usagePage=0x{cfg_page:04X} usage=0x{cfg_usage:04X}")
             print(f"Packet: {pkt.hex(' ')}")
-        for rtype, rtype_name in _REPORT_TYPES:
+
+        for rtype, rtype_name in report_types:
             if verbose:
                 print(f"  Trying {rtype_name} report …")
             try:
@@ -132,12 +154,10 @@ def set_debounce(ms: int, verbose: bool = False) -> str:
                 return name
             except OSError as exc:
                 last_err = exc
-                err_str = str(exc)
-                if "not found" in err_str:
-                    break        # device not present, skip remaining report types
+                if "not found" in str(exc):
+                    break
                 if verbose:
                     print(f"  → failed: {exc}")
-                continue         # try next report type
 
     raise RuntimeError(
         "No supported Glorious mouse found.\n"
@@ -148,9 +168,8 @@ def set_debounce(ms: int, verbose: bool = False) -> str:
 
 def probe_device() -> list:
     """
-    Try GET_REPORT on every report ID 0x00–0x0F across all interfaces and
-    report types for connected SINOWEALTH (VID 0x3794) devices.
-    Returns a list of dicts describing every report ID that responded successfully.
+    Try GET_REPORT on report IDs 0x00–0x0F on all SINOWEALTH interfaces.
+    Returns a list of dicts for every report ID that responded successfully.
     """
     _PROBE_TYPES = [
         (macos_hid._kIOHIDReportTypeFeature, "feature"),
@@ -159,8 +178,8 @@ def probe_device() -> list:
     results = []
     seen_ifaces = set()
 
-    for vid, pid, name, page, usage, _rid in SUPPORTED_DEVICES:
-        if vid != 0x3794:
+    for vid, pid, name, page, usage, protocol in SUPPORTED_DEVICES:
+        if protocol != PROTOCOL_SINOWEALTH:
             continue
         key = (vid, pid, page, usage)
         if key in seen_ifaces:
@@ -176,11 +195,11 @@ def probe_device() -> list:
                         length=65, report_type=rtype, usage=usage,
                     )
                     results.append({
-                        "name":       name,
-                        "iface":      f"usagePage=0x{page:04X} usage=0x{usage:04X}",
-                        "report_id":  report_id,
-                        "type":       rtype_name,
-                        "data":       data.hex(" "),
+                        "name":      name,
+                        "iface":     f"usagePage=0x{page:04X} usage=0x{usage:04X}",
+                        "report_id": report_id,
+                        "type":      rtype_name,
+                        "data":      data.hex(" "),
                     })
                 except OSError:
                     pass

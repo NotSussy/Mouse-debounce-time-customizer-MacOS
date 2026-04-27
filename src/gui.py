@@ -4,7 +4,12 @@ Works on any macOS version without any installed packages.
 """
 import subprocess
 
-from .device import DEBOUNCE_MAX, DEBOUNCE_MIN, find_device, set_debounce
+from .device import (
+    DEBOUNCE_MIN, DEBOUNCE_MAX,
+    SINOWEALTH_DEBOUNCE_MIN, SINOWEALTH_DEBOUNCE_MAX, SINOWEALTH_DEBOUNCE_STEP,
+    PROTOCOL_SINOWEALTH,
+    find_device, set_debounce,
+)
 
 
 def _run(script: str) -> tuple[int, str]:
@@ -14,19 +19,25 @@ def _run(script: str) -> tuple[int, str]:
 
 def run() -> None:
     while True:
-        found, name = find_device()
+        found, name, protocol = find_device()
         status = f"Connected: {name}" if found else "No Glorious mouse detected — connect USB"
 
-        options = "{" + ", ".join(
-            f'"{i} ms"' for i in range(DEBOUNCE_MIN, DEBOUNCE_MAX + 1)
-        ) + "}"
+        if protocol == PROTOCOL_SINOWEALTH:
+            valid_ms = list(range(SINOWEALTH_DEBOUNCE_MIN, SINOWEALTH_DEBOUNCE_MAX + 1,
+                                  SINOWEALTH_DEBOUNCE_STEP))
+            default = "4 ms"
+        else:
+            valid_ms = list(range(DEBOUNCE_MIN, DEBOUNCE_MAX + 1))
+            default = "4 ms"
+
+        options = "{" + ", ".join(f'"{i} ms"' for i in valid_ms) + "}"
 
         code, chosen = _run(f'''
             set opts to {options}
             set sel to (choose from list opts ¬
                 with title "Glorious Mouse Debounce" ¬
                 with prompt "{status}" & return & "Pick a debounce time and click Apply:" ¬
-                default items {{"4 ms"}} ¬
+                default items {{"{default}"}} ¬
                 OK button name "Apply" ¬
                 cancel button name "Quit")
             if sel is false then return ""
