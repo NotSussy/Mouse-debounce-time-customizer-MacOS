@@ -19,10 +19,12 @@ SUPPORTED_DEVICES = [
 DEBOUNCE_MIN = 1
 DEBOUNCE_MAX = 16
 
-# SINOWEALTH (0x3794) supports even values 4–16 ms (stored as ms // 2)
-SINOWEALTH_DEBOUNCE_MIN  = 4
-SINOWEALTH_DEBOUNCE_MAX  = 16
-SINOWEALTH_DEBOUNCE_STEP = 2
+# SINOWEALTH (0x3794) stores debounce as ms // 2, so the minimum distinct step is 2 ms.
+# 0 ms and 1 ms both encode to 0x00 — the chip cannot distinguish them.
+SINOWEALTH_DEBOUNCE_MIN = 0
+SINOWEALTH_DEBOUNCE_MAX = 16
+# Valid options offered to the user (0 and 1 are hardware-identical but both exposed)
+SINOWEALTH_DEBOUNCE_OPTIONS = [0, 1, 2, 4, 6, 8, 10, 12, 14, 16]
 
 # Glorious original protocol constants
 _REPORT_LEN   = 65
@@ -118,12 +120,7 @@ def set_debounce(ms: int, verbose: bool = False) -> str:
             if not SINOWEALTH_DEBOUNCE_MIN <= ms <= SINOWEALTH_DEBOUNCE_MAX:
                 raise ValueError(
                     f"Debounce must be {SINOWEALTH_DEBOUNCE_MIN}–{SINOWEALTH_DEBOUNCE_MAX} ms "
-                    f"(even values only) for {name}, got {ms}"
-                )
-            if ms % 2 != 0:
-                raise ValueError(
-                    f"Debounce must be an even number of ms for {name}, got {ms} "
-                    f"(try {ms - 1} or {ms + 1})"
+                    f"for {name}, got {ms}"
                 )
             pkt = _build_sinowealth_packet(ms)
             report_types = [(macos_hid._kIOHIDReportTypeFeature, "feature")]

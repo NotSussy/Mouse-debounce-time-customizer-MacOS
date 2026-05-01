@@ -6,7 +6,7 @@ import subprocess
 
 from .device import (
     DEBOUNCE_MIN, DEBOUNCE_MAX,
-    SINOWEALTH_DEBOUNCE_MIN, SINOWEALTH_DEBOUNCE_MAX, SINOWEALTH_DEBOUNCE_STEP,
+    SINOWEALTH_DEBOUNCE_OPTIONS,
     PROTOCOL_SINOWEALTH,
     find_device, set_debounce,
 )
@@ -23,8 +23,7 @@ def run() -> None:
         status = f"Connected: {name}" if found else "No Glorious mouse detected — connect USB"
 
         if protocol == PROTOCOL_SINOWEALTH:
-            valid_ms = list(range(SINOWEALTH_DEBOUNCE_MIN, SINOWEALTH_DEBOUNCE_MAX + 1,
-                                  SINOWEALTH_DEBOUNCE_STEP))
+            valid_ms = SINOWEALTH_DEBOUNCE_OPTIONS
             default = "4 ms"
         else:
             valid_ms = list(range(DEBOUNCE_MIN, DEBOUNCE_MAX + 1))
